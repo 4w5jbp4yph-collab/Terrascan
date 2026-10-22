@@ -1,1 +1,124 @@
+<!DOCTYPE html>
 
+<html lang="nl">
+
+<head>
+
+<meta charset="utf-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+<meta name="theme-color" content="#153b35">
+
+<title>TerraScan 0.9</title>
+
+<style>
+
+:root{--green:#153b35;--green2:#246456;--mint:#dff2e9;--bg:#f3f6f4;--ink:#152622;--muted:#687873;--line:#dce5e0;--orange:#e5a64b;--red:#b5473d}
+
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+
+header{background:var(--green);color:white;padding:18px 18px 16px;position:sticky;top:0;z-index:5}
+
+.brand{font-weight:800;font-size:23px;letter-spacing:.2px}.sub{opacity:.8;font-size:12px;margin-top:3px}
+
+main{max-width:720px;margin:auto;padding:14px 14px 94px}
+
+.card{background:white;border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px #173b3510}
+
+h2{font-size:17px;margin:0 0 12px}h3{font-size:15px;margin:0 0 8px}
+
+label{display:block;color:var
+<section id="settingsPage" class="hidden">
+
+ <div class="card"><h2>Instellingen</h2><label for="interval">Interval automatisch meten</label><select id="interval"><option value="1">Elke 1 seconde</option><option value="2" selected>Elke 2 seconden</option><option value="5">Elke 5 seconden</option><option value="10">Elke 10 seconden</option></select><p class="hint">Dit interval slaat in de demo automatisch voorbeeldpunten op zolang automatisch meten aanstaat.</p></div>
+
+ <div class="card"><h2>Opslag</h2><p class="hint">Projecten en punten worden lokaal opgeslagen in de browser op dit apparaat. Wis je browsergegevens of open je de demo in een andere browser, dan zijn ze mogelijk niet beschikbaar. Exporteer belangrijke punten naar CSV.</p><button class="danger" id="deleteActivePoints">Wis punten van actief project</button></div>
+
+ <div class="card"><h2>Wat werkt in deze versie?</h2><ul class="hint" style="padding-left:18px;line-height:1.7"><li>Projecten aanmaken, openen en hernoemen</li><li>Meetpunten apart per project bewaren</li><li>Demo-punten handmatig of automatisch opslaan</li><li>Schematische puntenkaart</li><li>CSV-export van het actieve project</li><li>Pistehoeken berekenen op basis van twee punten, lengte en breedte</li><li>Ontwerppeil vergelijken met handmatig ingevoerde hoogte</li><li>GNSS-testinvoer voor latitude, longitude, hoogte en status</li></ul><p class="hint"><b>Let op:</b> echte GNSS-ontvangst, RTK-correcties, terreinmodellering en grondverzetberekening zijn nog niet ingebouwd. Pistehoeken en peilverschillen zijn rekenhulpen en moeten vóór gebruik in het terrein met bekende maten worden gecontroleerd.</p></div>
+
+</section>
+
+<section id="setoutPage" class="hidden">
+
+ <div class="project-active"><div><small>Actief project</small><strong id="setoutProjectName">—</strong></div><button class="secondary small" id="setoutBack">Projecten</button></div>
+
+ <div class="status"><span class="dot"></span><span><b>REKENDEMO</b> — hoekberekening werkt met ingevoerde afmetingen; nog geen echte GNSS-navigatie.</span></div>
+
+ <div class="card"><h2>Piste uitzetten</h2><p class="hint">Voer twee gemeten punten in die de richting van de lange zijde bepalen. Vul daarna lengte en breedte in. De berekende hoeken zijn lokaal berekend in meters.</p>
+
+ <div class="row"><div><label for="ax">Punt A — Oost (m)</label><input id="ax" type="number" step="0.001" value="500000"></div><div><label for="ay">Punt A — Noord (m)</label><input id="ay" type="number" step="0.001" value="4470000"></div></div>
+
+ <div class="row"><div><label for="bx">Punt B — Oost (m)</label><input id="bx" type="number" step="0.001" value="500010"></div><div><label for="by">Punt B — Noord (m)</label><input id="by" type="number" step="0.001" value="4470000"></div></div>
+
+ <div class="row"><div><label for="lengthM">Lengte (m)</label><input id="lengthM" type="number" min="0.1" step="0.1" value="60"></div><div><label for="widthM">Breedte (m)</label><input id="widthM" type="number" min="0.1" step="0.1" value="30"></div></div>
+
+ <label for="sideChoice">Breedte aan welke kant van A→B?</label><select id="sideChoice"><option value="1">Links</option><option value="-1">Rechts</option></select>
+
+ <button class="primary" id="calcCorners" style="width:100%;margin-top:12px">Bereken vier hoeken</button><div id="cornerResults" style="margin-top:12px"></div>
+
+ </div>
+
+ <div class="card"
+<script>
+
+const STORE='terrascan_v07_data';
+
+let lastTestFix=null;
+
+let data=loadData(), activeId=data.activeId||null, autoTimer=null;
+
+function loadData(){try{return JSON.parse(localStorage.getItem(STORE))||{projects:[],activeId:null}}catch(e){return {projects:[],activeId:null}}}
+
+function persist(){data.activeId=activeId;localStorage.setItem(STORE,JSON.stringify(data))}
+
+function uid(){return 'p_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7)}
+
+function active(){return data.projects.find(p=>p.id===activeId)||null}
+
+function dateText(d){return new Date(d).toLocaleDateString('nl-NL',{day:'2-digit',month:'short',year:'numeric'})}
+
+function showPage(id){document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==id));document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.page===id));if(id==='projectsPage')renderProjects();if(id==='measurePage')renderMeasure();if(id==='mapPage')renderPoints();if(id==='setoutPage'){document.getElementById('setoutProjectName').textContent=active()?.name||'Geen project gekozen';calcCorners()}}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
+
+document.getElementById('createProject').addEventListener('click',()=>{
+
+ let name=document.getElementById('newProjectName').value.trim();
+
+ if(!name){name='Nieuw terrein'}
+
+ const p={id:uid(),name,created:new Date().toISOString(),points:[],referenceHeight:100};
+
+ data.projects.unshift(p);act
+function renderPoints(){
+
+ const p=active();
+
+ const table=document.getElementById('pointsTable');
+
+ const empty=document.getElementById('emptyPoints');
+
+ table.innerHTML='';
+
+ if(!p){empty.classList.remove('hidden');document.getElementById('mapSvg').innerHTML='';return}
+
+ const pts=p.points||[];
+
+ empty.classList.toggle('hidden',pts.length>0);
+
+ document.getElementById('mapProjectName').textContent=p.name;
+
+ if(pts.length){
+
+  const t=document.createElement('table');
+
+  t.innerHTML='<thead><tr><th>#</th><th>Tijd</th><th>Oost</th><th>Noord</th><th>Hoogteverschil</th></tr></thead>';
+
+  const body=document.createElement('tbody');
+
+  pts.slice().reverse().forEach(pt=>{
+
+   const tr=document.createElement('tr');
+
+   [pt.n||'',new Date(pt.time
